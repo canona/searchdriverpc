@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/canona/video2video_hvcnd.git"
+    "url": "https://github.com/canona/searchdriverpc.git"
   },
   "main": "dist-electron/main.js",
   "private": true,

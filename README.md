@@ -53,8 +53,8 @@ làm:
 ### Cách 1 — Chạy từ mã nguồn
 
 ```powershell
-git clone https://github.com/canona/video2video_hvcnd.git SearchDriverPC
-cd SearchDriverPC
+git clone https://github.com/canona/searchdriverpc.git
+cd searchdriverpc
 npm install
 npm start
 ```
