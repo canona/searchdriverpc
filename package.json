@@ -1,0 +1,61 @@
+{
+  "name": "search-driver-pc",
+  "version": "1.0.0",
+  "description": "Quét phần cứng Windows và tìm trang tải driver chính chủ",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/canona/video2video_hvcnd.git"
+  },
+  "main": "dist-electron/main.js",
+  "private": true,
+  "scripts": {
+    "build:main": "tsc -p electron/tsconfig.json",
+    "build:renderer": "vite build",
+    "build": "npm run build:renderer && npm run build:main",
+    "start": "npm run build && electron .",
+    "dev": "npm run build:main && concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p electron/tsconfig.json --noEmit",
+    "test": "npm run build:main && node --test \"dist-electron/tests/*.test.js\"",
+    "dist": "npm run build && electron-builder --win"
+  },
+  "build": {
+    "appId": "vn.local.searchdriverpc",
+    "productName": "SearchDriverPC",
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "!dist-electron/tests/**"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "ids",
+        "filter": [
+          "*.ids"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "requestedExecutionLevel": "asInvoker"
+    }
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^10.0.5",
+    "cross-env": "^10.1.0",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1",
+    "wait-on": "^9.1.0"
+  }
+}
