@@ -23,7 +23,7 @@ $session  = New-Object -ComObject Microsoft.Update.Session
 $searcher = $session.CreateUpdateSearcher()
 $result   = $searcher.Search("IsInstalled=0 and Type='Driver' and IsHidden=0")
 $updates = @(foreach ($u in $result.Updates) {
-  [pscustomobject]@{
+  @{
     title        = $u.Title
     manufacturer = $u.DriverManufacturer
     model        = $u.DriverModel
@@ -33,7 +33,7 @@ $updates = @(foreach ($u in $result.Updates) {
     sizeMB       = [math]::Round($u.MaxDownloadSize / 1MB, 1)
   }
 })
-[pscustomobject]@{ updates = $updates } | ConvertTo-Json -Depth 3 -Compress
+Out-Json @{ updates = $updates }
 `;
 
 function str(v: unknown): string | null {

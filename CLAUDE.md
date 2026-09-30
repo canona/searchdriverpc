@@ -49,13 +49,13 @@ Catalog, và sao lưu (export) driver đang cài. **App không bao giờ tự c�
 
 | Lớp | Công nghệ |
 | --- | --- |
-| Desktop shell | Electron 44 (main process TypeScript → CommonJS, `tsc`) |
+| Desktop shell | Electron 44 (main process TypeScript → CommonJS, `tsc`); bản Win7/8.1: Electron 22 |
 | UI | React 19 + TypeScript, Vite 8, CSS thuần với CSS variables (dark/light) |
 | Truy cập hệ thống | PowerShell 5.1 (`Get-CimInstance`, `Get-PnpDeviceProperty`, `Get-AuthenticodeSignature`, COM Windows Update), `pnputil.exe`, `expand.exe` |
 | Mạng | `fetch` của Node (chỉ tới Microsoft Update Catalog) |
 | Dữ liệu offline | `pci.ids`, `usb.ids` |
 | Test | `node:test` (build bằng `tsc` rồi chạy trong `dist-electron/tests`) |
-| Đóng gói | electron-builder (NSIS) |
+| Đóng gói | electron-builder (NSIS) + makensis cho bộ cài Universal |
 
 Chọn Electron thay Tauri vì máy phát triển ban đầu không có Rust toolchain; logic ở `electron/*.ts`
 là TypeScript thuần, có thể port sang Rust nếu cần.
@@ -94,7 +94,9 @@ npm start          # build + chạy
 npm run dev        # Vite dev server + Electron
 npm run typecheck  # tsc cả renderer và main
 npm test           # build main + chạy unit test
-npm run dist       # installer NSIS vào release/
+npm run dist             # bộ cài + portable Win10/11 x64 vào release/
+npm run dist:win7        # bộ cài + portable Win7/8.1 (Electron 22, x64 + ia32) vào release/win7/
+npm run dist:universal   # một bộ cài Win7 -> 11, tự chọn bản: release/SearchDriverPC-Setup-Universal-<ver>.exe
 ```
 
 ## Quy ước & lưu ý
@@ -108,4 +110,11 @@ npm run dist       # installer NSIS vào release/
 - Catalog tìm kiếm rất "lỏng" — kết quả chỉ là ứng viên; bước đối chiếu `.inf` mới là xác nhận.
 - Nếu môi trường có `ELECTRON_RUN_AS_NODE=1` (vd chạy từ extension host của VS Code), Electron chạy như
   Node và `require('electron')` trả `undefined` — bỏ biến này khi chạy app.
+- **Bản Windows 7/8.1** (`npm run dist:win7`, `electron-builder.win7.js`) chạy cùng mã trên Electron 22 =
+  Node 16 + Chromium 108. Main process KHÔNG dùng API Node > 16 (fetch, `Readable.fromWeb`,
+  `readdir({recursive})`, `Dirent.parentPath`...) — dùng `http.ts`, `winCompat.ts`. Script PowerShell phải
+  chạy được trên **PowerShell 2.0**: `Get-WmiObject` (không `Get-CimInstance`), hashtable `@{}` (không
+  `[pscustomobject]`), xuất kết quả bằng `Out-Json` (không `ConvertTo-Json`). Kiểm tra bằng
+  `powershell -Version 2`. Tính năng chỉ có trên Win10 (pnputil /export-driver) phải báo lỗi rõ khi
+  `isLegacyWindows()`.
 - Trước khi kết thúc thay đổi: `npm run typecheck` và `npm test` phải sạch.

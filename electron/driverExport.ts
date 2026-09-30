@@ -4,6 +4,7 @@ import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { runPowerShellJson } from './powershell';
 import type { DeviceInfo, DriverExportResult, ExportAllProgress, InstalledDriverInfo } from './types';
+import { isLegacyWindows, listFilesRecursive } from './winCompat';
 
 /*
  * EXPORT (SAO LƯU) DRIVER ĐANG CÀI
@@ -35,18 +36,45 @@ function timestamp(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
 }
 
-/** Đọc driver đang dùng của thiết bị qua DEVPKEY (không cần admin). */
+/*
+ * Ngày driver từ Get-WmiObject là chuỗi DMTF ("20210315000000.000000-000"),
+ * từ Get-PnpDeviceProperty là DateTime -> đưa cả hai về yyyy-MM-dd.
+ */
+const DATE_HELPER = `function Format-SdpDate($d) {
+  if (-not $d) { return $null }
+  if ($d -is [string]) { $d = [Management.ManagementDateTimeConverter]::ToDateTime($d) }
+  return ([datetime]$d).ToString('yyyy-MM-dd')
+}`;
+
+/**
+ * Đọc driver đang dùng của thiết bị (không cần admin): qua DEVPKEY nếu có lệnh
+ * Get-PnpDeviceProperty (Win8+ / PowerShell 5), nếu không (Win7) thì qua WMI
+ * Win32_PnPSignedDriver (chậm hơn vài giây nhưng có ở mọi bản Windows).
+ */
 export async function getInstalledDriver(device: DeviceInfo): Promise<InstalledDriverInfo> {
   const r = await runPowerShellJson<Partial<InstalledDriverInfo>>(
-    `$keys = 'DEVPKEY_Device_DriverInfPath','DEVPKEY_Device_DriverProvider','DEVPKEY_Device_DriverVersion','DEVPKEY_Device_DriverDate'
-$m = @{}
-foreach ($p in @(Get-PnpDeviceProperty -InstanceId $env:SDP_DEVICE_ID -KeyName $keys -ErrorAction SilentlyContinue)) { $m[$p.KeyName] = $p.Data }
-[pscustomobject]@{
-  infName  = $m['DEVPKEY_Device_DriverInfPath']
-  provider = $m['DEVPKEY_Device_DriverProvider']
-  version  = $m['DEVPKEY_Device_DriverVersion']
-  date     = $(if ($m['DEVPKEY_Device_DriverDate']) { ([datetime]$m['DEVPKEY_Device_DriverDate']).ToString('yyyy-MM-dd') } else { $null })
-} | ConvertTo-Json -Compress`,
+    String.raw`${DATE_HELPER}
+if (Get-Command Get-PnpDeviceProperty -ErrorAction SilentlyContinue) {
+  $keys = 'DEVPKEY_Device_DriverInfPath','DEVPKEY_Device_DriverProvider','DEVPKEY_Device_DriverVersion','DEVPKEY_Device_DriverDate'
+  $m = @{}
+  foreach ($p in @(Get-PnpDeviceProperty -InstanceId $env:SDP_DEVICE_ID -KeyName $keys -ErrorAction SilentlyContinue)) { $m[$p.KeyName] = $p.Data }
+  Out-Json @{
+    infName  = $m['DEVPKEY_Device_DriverInfPath']
+    provider = $m['DEVPKEY_Device_DriverProvider']
+    version  = $m['DEVPKEY_Device_DriverVersion']
+    date     = Format-SdpDate $m['DEVPKEY_Device_DriverDate']
+  }
+} else {
+  # Trong chuỗi WQL, dấu \ và ' phải escape bằng \ đứng trước.
+  $id = $env:SDP_DEVICE_ID.Replace('\', '\\').Replace("'", "\'")
+  $d = Get-WmiObject -Class Win32_PnPSignedDriver -Filter "DeviceID='$id'" | Select-Object -First 1
+  Out-Json @{
+    infName  = $(if ($d) { $d.InfName } else { $null })
+    provider = $(if ($d) { $d.DriverProviderName } else { $null })
+    version  = $(if ($d) { $d.DriverVersion } else { $null })
+    date     = $(if ($d) { Format-SdpDate $d.DriverDate } else { $null })
+  }
+}`,
     30_000,
     { SDP_DEVICE_ID: device.id },
   );
@@ -68,10 +96,17 @@ function runPnputil(args: string[], onSpawn?: (c: ChildProcess) => void): Promis
 
 async function folderSize(dir: string): Promise<number> {
   let total = 0;
-  for (const e of await readdir(dir, { withFileTypes: true, recursive: true })) {
-    if (e.isFile()) total += (await stat(join(e.parentPath, e.name))).size;
-  }
+  for (const f of await listFilesRecursive(dir)) total += (await stat(f)).size;
   return total;
+}
+
+/** pnputil /export-driver chỉ có từ Windows 10 (1607); pnputil của Win7/8.1 không export được. */
+function assertExportSupported(): void {
+  if (isLegacyWindows()) {
+    throw new Error(
+      'Export driver cần Windows 10 trở lên (pnputil /export-driver). Trên Windows 7/8.1 hãy dùng công cụ sao lưu driver riêng hoặc tải lại driver từ trang hãng.',
+    );
+  }
 }
 
 async function ensureFreeSpace(dir: string, needed: number): Promise<void> {
@@ -91,6 +126,7 @@ async function ensureFreeSpace(dir: string, needed: number): Promise<void> {
 
 /** Export driver của MỘT thiết bị vào <dest>\<tên thiết bị> (<oemXX.inf>)\ */
 export async function exportDeviceDriver(device: DeviceInfo, dest: string): Promise<DriverExportResult> {
+  assertExportSupported();
   const info = await getInstalledDriver(device);
   if (!info.infName) throw new Error('Thiết bị chưa có driver nên không có gì để export.');
   if (!INF_NAME_RE.test(info.infName)) throw new Error(`Tên INF không hợp lệ: ${info.infName}`);
@@ -153,17 +189,18 @@ interface SignedDriverRow {
 /** Danh sách thiết bị <-> gói oem*.inf để người dùng biết mỗi thư mục là driver của thiết bị nào. */
 async function listThirdPartyDrivers(): Promise<SignedDriverRow[]> {
   const rows = await runPowerShellJson<SignedDriverRow[] | SignedDriverRow | null>(
-    `@(Get-CimInstance Win32_PnPSignedDriver | Where-Object { $_.InfName -like 'oem*.inf' } | ForEach-Object {
-  [pscustomobject]@{
+    `${DATE_HELPER}
+Out-Json @(Get-WmiObject -Class Win32_PnPSignedDriver | Where-Object { $_.InfName -like 'oem*.inf' } | ForEach-Object {
+  @{
     deviceName  = $_.DeviceName
     infName     = $_.InfName
     provider    = $_.DriverProviderName
     version     = $_.DriverVersion
-    date        = $(if ($_.DriverDate) { $_.DriverDate.ToString('yyyy-MM-dd') } else { $null })
+    date        = Format-SdpDate $_.DriverDate
     deviceClass = $_.DeviceClass
     hardwareId  = $_.HardWareID
   }
-}) | ConvertTo-Json -Depth 2 -Compress`,
+})`,
     120_000,
   ).catch(() => null);
   return Array.isArray(rows) ? rows : rows ? [rows] : [];
@@ -183,6 +220,7 @@ export async function exportAllDrivers(
   onProgress: (p: ExportAllProgress) => void,
 ): Promise<DriverExportResult> {
   if (running) throw new Error('Đang export, vui lòng đợi.');
+  assertExportSupported();
   const total = await countThirdPartyInfs();
   if (total === 0) throw new Error('Không có driver bên thứ ba nào trong Driver Store.');
 

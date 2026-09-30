@@ -34,6 +34,18 @@ làm:
 | 💾 **Export driver** | Sao lưu driver đang cài của một thiết bị, hoặc **export toàn bộ** driver bên thứ ba ra thư mục bạn chọn, kèm danh sách và hướng dẫn khôi phục. |
 | 📄 **Xuất danh sách** | Xuất danh sách thiết bị có vấn đề ra `.csv` (mở tốt trong Excel) hoặc `.txt` để tự tra cứu hay gửi người hỗ trợ. |
 | 🎨 **Giao diện** | Bảng lọc theo trạng thái, tìm theo tên/hãng/Hardware ID, dark/light mode. |
+| 🖥️ **Windows 7 → 11** | Một bộ cài dùng cho mọi bản Windows từ 7 SP1 đến 11, cả 64-bit và 32-bit. Bộ cài tự chọn bản phù hợp với máy. |
+
+### Tính năng theo phiên bản Windows
+
+| Tính năng | Windows 10 / 11 | Windows 7 SP1 / 8 / 8.1 |
+| --- | :---: | :---: |
+| Quét phần cứng, nhận diện offline | ✅ | ✅ |
+| Mở trang driver chính chủ | ✅ | ✅ |
+| Kiểm tra Windows Update | ✅ | ✅ (mở Windows Update trong Control Panel) |
+| Tìm & tải driver từ Microsoft Update Catalog | ✅ | ✅ (cần bản vá SHA-2 **KB4474419**) |
+| Xuất danh sách `.csv` / `.txt` | ✅ | ✅ |
+| Export (sao lưu) driver đang cài | ✅ | ❌ (`pnputil /export-driver` chỉ có từ Windows 10) |
 
 <details>
 <summary>Thêm ảnh chụp màn hình</summary>
@@ -43,12 +55,62 @@ làm:
 
 </details>
 
-## Cài đặt & chạy
+## Cài đặt (người dùng)
+
+### Yêu cầu hệ thống
+
+- **Windows 7 SP1, 8, 8.1, 10 hoặc 11**, 64-bit hoặc 32-bit.
+- Không cần quyền admin, không cần cài thêm gì. App dùng WMI, PowerShell (từ bản 2.0 có sẵn trên
+  Win7), `pnputil`, `expand.exe`, đều là thành phần có sẵn của Windows.
+- Riêng Windows 7: nên cập nhật Windows Update đầy đủ, tối thiểu có **SP1 (KB976932)** và bản vá SHA-2
+  **KB4474419** để dùng được tính năng tải driver.
+
+### Chọn bộ cài
+
+Tải file từ trang [Releases](https://github.com/canona/searchdriverpc/releases), hoặc tự build theo
+phần [Build từ mã nguồn](#build-từ-mã-nguồn).
+
+| File | Dành cho |
+| --- | --- |
+| `SearchDriverPC-Setup-Universal-<ver>.exe` | **Khuyên dùng.** Mọi máy Windows 7 → 11. Bộ cài tự chọn bản phù hợp |
+| `SearchDriverPC-Setup-<ver>.exe` | Chỉ Windows 10/11 64-bit (file nhỏ hơn) |
+| `SearchDriverPC-Portable-<ver>.exe` | Windows 10/11 64-bit, chạy thẳng không cần cài |
+| `SearchDriverPC-Win7-Portable-<ver>-x64.exe` / `-ia32.exe` | Windows 7/8/8.1 (64-bit / 32-bit), chạy thẳng không cần cài |
+
+### Các bước cài
+
+1. Chạy file `SearchDriverPC-Setup-…exe`. Windows SmartScreen có thể cảnh báo vì file chưa được ký số
+   thương mại: bấm **More info → Run anyway**.
+2. Chọn thư mục cài (mặc định `%LOCALAPPDATA%\Programs\SearchDriverPC`), bấm **Install**. Bộ cài chạy
+   với quyền user thường, tạo lối tắt trên Desktop và Start Menu.
+3. Mở **SearchDriverPC**. App tự quét phần cứng ngay lần đầu.
+
+Gỡ cài đặt: **Settings › Apps** (Win10/11) hoặc **Control Panel › Programs and Features** (Win7/8.1) →
+*SearchDriverPC* → *Uninstall*.
+
+Cài im lặng (cho quản trị viên): `SearchDriverPC-Setup-Universal-<ver>.exe /S`, thêm `/D=<thư mục>` ở
+cuối nếu muốn đổi thư mục cài.
+
+### Bộ cài Universal hoạt động thế nào
+
+Electron (nền tảng của app) đã bỏ hỗ trợ Windows 7/8/8.1 từ bản 23, nên bộ cài Universal chứa sẵn hai bản
+dùng chung một mã nguồn và tự chọn lúc cài:
+
+| Máy | Bản được cài |
+| --- | --- |
+| Windows 10/11 64-bit | Bản chính: Electron mới, còn nhận bản vá bảo mật, đủ tính năng |
+| Windows 7 SP1 / 8 / 8.1, hoặc Windows 32-bit | Bản Electron 22 (bản cuối hỗ trợ Win7), cả 64-bit và 32-bit |
+| Cũ hơn Windows 7 SP1 | Báo lỗi và dừng |
+
+Electron 22 không còn nhận bản vá bảo mật. Rủi ro được hạn chế vì app chỉ hiển thị giao diện nội bộ
+(không tải trang web bên ngoài vào cửa sổ app), nhưng máy Windows 10/11 vẫn luôn được cài bản chính.
+
+## Build từ mã nguồn
 
 ### Yêu cầu
 
-- **Windows 10 hoặc 11** (x64). App dùng WMI, PowerShell 5.1, `pnputil`, `expand.exe`, đều có sẵn trong Windows.
-- Để build từ mã nguồn: **Node.js 20+** (khuyến nghị bản LTS mới nhất) và **Git**.
+- **Node.js 20+** (khuyến nghị bản LTS mới nhất) và **Git**, trên máy Windows.
+- Các lệnh đóng gói tự tải Electron và NSIS về cache ở lần chạy đầu (cần mạng).
 
 ### Cách 1 — Chạy từ mã nguồn
 
@@ -62,14 +124,23 @@ npm start
 `npm start` build giao diện và main process rồi mở app. Lần chạy đầu, app tự quét phần cứng, thường mất
 vài giây.
 
-### Cách 2 — Tự đóng gói bản cài đặt (.exe)
+### Cách 2 — Đóng gói bộ cài
 
 ```powershell
 npm install
-npm run dist
+npm run dist:universal   # bộ cài Universal (Windows 7 → 11)
 ```
 
-Bộ cài NSIS được tạo trong thư mục `release/`. Bộ cài chạy với quyền user thường (`asInvoker`).
+| Lệnh | Kết quả |
+| --- | --- |
+| `npm run dist:universal` | `release/SearchDriverPC-Setup-Universal-<ver>.exe` (~240 MB): build cả hai bản dưới đây rồi gộp lại |
+| `npm run dist` | `release/`: bộ cài + bản portable cho Windows 10/11 x64 (Electron mới) |
+| `npm run dist:win7` | `release/win7/`: bộ cài (x64 + ia32) + bản portable cho Windows 7/8/8.1 (Electron 22) |
+
+Các file liên quan: `electron-builder.win7.js` (cấu hình bản Win7), `build/installer-win7.nsh` (kiểm tra
+Win7 SP1), `build/universal-installer.nsi` + `scripts/build-universal.js` (bộ cài Universal).
+`makensis` được lấy từ cache của electron-builder; có thể chỉ định bản khác qua biến môi trường
+`MAKENSIS`.
 
 ### Các lệnh khác
 
@@ -114,15 +185,15 @@ Bộ cài NSIS được tạo trong thư mục `release/`. Bộ cài chạy vớ
    `HUONG-DAN-CAI-DAT.txt`.
 5. **Sao lưu driver**: dùng *Export driver này…* trong chi tiết thiết bị, hoặc **Export tất cả driver**
    trên thanh đầu. Thư mục sao lưu có `HUONG-DAN-KHOI-PHUC.txt`, trong đó có lệnh khôi phục một lần
-   cho tất cả (bạn tự chạy với quyền admin).
+   cho tất cả (bạn tự chạy với quyền admin). Tính năng này chỉ có trên Windows 10/11.
 
 ## App hoạt động thế nào
 
 <details>
 <summary>Quét và nhận diện</summary>
 
-- PowerShell `Get-CimInstance Win32_PnPEntity` lấy `Name`, `HardwareID[]`, `ConfigManagerErrorCode`,
-  `Present`… Việc này chỉ đọc, không cần admin.
+- PowerShell `Get-WmiObject Win32_PnPEntity` lấy `Name`, `HardwareID[]`, `ConfigManagerErrorCode`,
+  `Present`… Việc này chỉ đọc, không cần admin. Script viết để chạy được từ PowerShell 2.0 (Win7) đến 5.1.
 - Hardware ID như `PCI\VEN_10EC&DEV_8168&SUBSYS_86771043&REV_15` được tách thành vendor `10EC` (Realtek),
   device `8168`, subsystem vendor `1043` (ASUS) và subsystem device `8677`.
 - PCI và HD Audio tra trong `pci.ids`; USB và HID tra trong `usb.ids`. ACPI dùng mã chữ (vd `INT33A0`)
@@ -175,6 +246,8 @@ Nếu bạn phát hiện lỗ hổng bảo mật, vui lòng báo riêng qua GitH
 electron/      main process: quét WMI, parse ID, catalog, tải/xác minh, export, IPC
 src/           giao diện React (App, components/, hooks/)
 resources/     pci.ids, usb.ids (dữ liệu offline)
+build/         script NSIS: kiểm tra Win7 SP1, bộ cài Universal
+scripts/       build-universal.js (gộp hai bộ cài)
 docs/          ảnh chụp màn hình
 CLAUDE.md      yêu cầu, ràng buộc và quy ước chi tiết của dự án
 ```
@@ -189,6 +262,8 @@ Rất hoan nghênh issue và pull request! Vài điểm cần lưu ý:
   ngoài Microsoft Update Catalog, và không đòi quyền admin. PR vi phạm các điểm này sẽ không được nhận.
 - Thêm hãng vào bảng link chính chủ: sửa `electron/vendorLinks.ts`. Allowlist tự cập nhật theo bảng.
 - Trước khi gửi PR, chạy `npm run typecheck` và `npm test`.
+- Code phải chạy được cả trên bản Win7 (Node 16, PowerShell 2.0). Xem mục "Bản Windows 7/8.1" trong
+  [CLAUDE.md](CLAUDE.md).
 - Comment và chuỗi giao diện viết bằng tiếng Việt, tên biến/hàm bằng tiếng Anh.
 
 Muốn cập nhật database ID:

@@ -1,4 +1,5 @@
 import { shortHardwareId } from './hardwareId';
+import { httpText, type HttpOptions } from './http';
 import type { CatalogEntry, DeviceInfo } from './types';
 
 /*
@@ -234,19 +235,14 @@ export function buildQueries(device: DeviceInfo): { specific: string | null; gen
   return { specific: specific && specific !== general ? specific : null, general };
 }
 
-async function httpText(url: string, init?: RequestInit): Promise<string> {
-  const res = await fetch(url, {
-    ...init,
-    headers: { 'User-Agent': USER_AGENT, ...(init?.headers ?? {}) },
-    signal: AbortSignal.timeout(30_000),
-    redirect: 'follow',
-  });
-  if (!res.ok) throw new Error(`Microsoft Update Catalog trả lỗi HTTP ${res.status}`);
-  return res.text();
+async function catalogText(url: string, init?: Pick<HttpOptions, 'method' | 'headers' | 'body'>): Promise<string> {
+  const res = await httpText(url, { ...init, headers: { 'User-Agent': USER_AGENT, ...init?.headers }, timeoutMs: 30_000 });
+  if (res.status < 200 || res.status >= 300) throw new Error(`Microsoft Update Catalog trả lỗi HTTP ${res.status}`);
+  return res.text;
 }
 
 export async function searchCatalog(query: string): Promise<RawCatalogEntry[]> {
-  const html = await httpText(`${CATALOG}/Search.aspx?q=${encodeURIComponent(query)}`);
+  const html = await catalogText(`${CATALOG}/Search.aspx?q=${encodeURIComponent(query)}`);
   if (html.includes('id="ctl00_catalogBody_noResultText"') && !/_R\d+"/.test(html)) return [];
   return parseSearchHtml(html);
 }
@@ -256,7 +252,7 @@ export async function getDownloadInfo(updateId: string): Promise<DownloadInfo> {
   const body =
     'updateIDs=' +
     encodeURIComponent(JSON.stringify([{ size: 0, languages: '', uidInfo: updateId, updateID: updateId }]));
-  const html = await httpText(`${CATALOG}/DownloadDialog.aspx`, {
+  const html = await catalogText(`${CATALOG}/DownloadDialog.aspx`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,

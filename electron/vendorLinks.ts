@@ -116,6 +116,8 @@ const CATALOG_HOST ='www.catalog.update.microsoft.com';
 
 /** URI mở trang "Optional updates" trong Settings của Windows. */
 export const WINDOWS_UPDATE_SETTINGS_URI = 'ms-settings:windowsupdate-optionalupdates';
+/** Windows 7/8.1 không có ms-settings: -> mở Windows Update trong Control Panel. */
+export const LEGACY_WINDOWS_UPDATE_ARGS = ['/name', 'Microsoft.WindowsUpdate'];
 
 function chipVendor(space: IdSpace | null, vendorId: string | null): Vendor | null {
   if (!space || !vendorId) return null;

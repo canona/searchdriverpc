@@ -25,31 +25,84 @@ import { buildDriverLinks, oemFromManufacturer } from './vendorLinks';
  * (gợi ý trang hỗ trợ OEM).
  */
 
-const SCAN_SCRIPT = `
-$devices = @(Get-CimInstance -ClassName Win32_PnPEntity | ForEach-Object {
-  [pscustomobject]@{
+// Get-WmiObject thay vì Get-CimInstance: có từ PowerShell 2.0 (Win7) và cho cùng dữ liệu.
+// Win7/8.1 không có thuộc tính PNPClass/Present -> gửi kèm ClassGuid để suy ra nhóm thiết bị.
+export const SCAN_SCRIPT = `
+$devices = @(Get-WmiObject -Class Win32_PnPEntity | ForEach-Object {
+  @{
     name          = $_.Name
     pnpDeviceId   = $_.PNPDeviceID
     hardwareIds   = @($_.HardwareID | Where-Object { $_ })
     compatibleIds = @($_.CompatibleID | Where-Object { $_ })
     manufacturer  = $_.Manufacturer
     pnpClass      = $_.PNPClass
+    classGuid     = $_.ClassGuid
     errorCode     = $_.ConfigManagerErrorCode
     present       = $_.Present
   }
 })
-$cs = Get-CimInstance -ClassName Win32_ComputerSystem
-$bb = Get-CimInstance -ClassName Win32_BaseBoard | Select-Object -First 1
-[pscustomobject]@{
+$cs = Get-WmiObject -Class Win32_ComputerSystem
+$bb = Get-WmiObject -Class Win32_BaseBoard | Select-Object -First 1
+Out-Json @{
   devices = $devices
-  system  = [pscustomobject]@{
+  system  = @{
     manufacturer      = $cs.Manufacturer
     model             = $cs.Model
     boardManufacturer = $bb.Manufacturer
     boardProduct      = $bb.Product
   }
-} | ConvertTo-Json -Depth 4 -Compress
+}
 `;
+
+/*
+ * ClassGuid -> tên nhóm (giống PNPClass của Win10) cho Windows 7/8.1.
+ * Nguồn: "System-Defined Device Setup Classes" (Microsoft Learn).
+ */
+const CLASS_BY_GUID: Record<string, string> = {
+  '{4d36e968-e325-11ce-bfc1-08002be10318}': 'Display',
+  '{4d36e972-e325-11ce-bfc1-08002be10318}': 'Net',
+  '{4d36e96c-e325-11ce-bfc1-08002be10318}': 'MEDIA',
+  '{36fc9e60-c465-11cf-8056-444553540000}': 'USB',
+  '{745a17a0-74d3-11d0-b6fe-00a0c90f57da}': 'HIDClass',
+  '{4d36e96b-e325-11ce-bfc1-08002be10318}': 'Keyboard',
+  '{4d36e96f-e325-11ce-bfc1-08002be10318}': 'Mouse',
+  '{4d36e97d-e325-11ce-bfc1-08002be10318}': 'System',
+  '{4d36e96a-e325-11ce-bfc1-08002be10318}': 'hdc',
+  '{4d36e97b-e325-11ce-bfc1-08002be10318}': 'SCSIAdapter',
+  '{4d36e967-e325-11ce-bfc1-08002be10318}': 'DiskDrive',
+  '{4d36e965-e325-11ce-bfc1-08002be10318}': 'CDROM',
+  '{71a27cdd-812a-11d0-bec7-08002be2092f}': 'Volume',
+  '{50dd5230-ba8a-11d1-bf5d-0000f805f530}': 'SmartCardReader',
+  '{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}': 'Bluetooth',
+  '{6bdd1fc6-810f-11d0-bec7-08002be2092f}': 'Image',
+  '{ca3e7ab9-b4c3-4ae6-8251-579ef933890f}': 'Camera',
+  '{4d36e979-e325-11ce-bfc1-08002be10318}': 'Printer',
+  '{4d36e978-e325-11ce-bfc1-08002be10318}': 'Ports',
+  '{4d36e96d-e325-11ce-bfc1-08002be10318}': 'Modem',
+  '{4d36e97e-e325-11ce-bfc1-08002be10318}': 'Unknown',
+  '{50127dc3-0f36-415e-a6cc-4cb3be910b65}': 'Processor',
+  '{72631e54-78a4-11d0-bcf7-00aa00b7b32a}': 'Battery',
+  '{4d36e97c-e325-11ce-bfc1-08002be10318}': 'Sound',
+  '{4d36e96e-e325-11ce-bfc1-08002be10318}': 'Monitor',
+  '{8ecc055d-047f-11d1-a537-0000f8753ed1}': 'LegacyDriver',
+  '{d45b1c18-c8fa-11d1-9f77-0000f805f530}': 'Infrared',
+  '{6d807884-7d21-11cf-801c-08002be10318}': 'PCMCIA',
+  '{a0a588a4-c46f-4b37-b7ea-c82fe89870c6}': 'SDHost',
+  '{d48179be-ec20-11d1-b6b8-00c04fa372a7}': 'SBP2',
+  '{6bdd1fc1-810f-11d0-bec7-08002be2092f}': '1394',
+  '{88bae032-5a81-49f0-bc3d-a4ff138216d6}': 'USBDevice',
+  '{eec5ad98-8080-425f-922a-dabf3de3f69a}': 'WPD',
+  '{5099944a-f6b9-4057-a056-8c550228544c}': 'Firmware',
+  '{c166523c-fe0c-4a94-a586-f1a80cfbbf3e}': 'AudioEndpoint',
+  '{62f9c741-b25a-46ce-b54c-9bccce08b6f2}': 'SoftwareDevice',
+  '{d94ee5d8-d189-4994-83d2-f68d7d41b0e6}': 'SecurityDevices',
+  '{f2e7dd72-6468-4e36-b6f1-6488f42c1b52}': 'Biometric',
+  '{5175d334-c371-4806-b3ba-71fd53c9258d}': 'SensorDevice',
+};
+
+export function classFromGuid(guid: unknown): string | null {
+  return typeof guid === 'string' ? (CLASS_BY_GUID[guid.trim().toLowerCase()] ?? null) : null;
+}
 
 /** Dạng dữ liệu thô PowerShell trả về (chưa tin cậy kiểu -> chuẩn hóa bên dưới). */
 interface RawDevice {
@@ -59,6 +112,7 @@ interface RawDevice {
   compatibleIds?: string[] | string | null;
   manufacturer?: string | null;
   pnpClass?: string | null;
+  classGuid?: string | null;
   errorCode?: number | null;
   present?: boolean | null;
 }
@@ -135,7 +189,7 @@ export async function scanHardware(lookup: IdLookup): Promise<ScanResult> {
     devices.push({
       id,
       name: cleanString(d.name) ?? deviceName ?? 'Thiết bị không tên',
-      pnpClass: cleanString(d.pnpClass),
+      pnpClass: cleanString(d.pnpClass) ?? classFromGuid(d.classGuid),
       manufacturer: cleanString(d.manufacturer),
       hardwareIds,
       errorCode: typeof d.errorCode === 'number' ? d.errorCode : 0,

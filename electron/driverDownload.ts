@@ -1,14 +1,16 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { mkdir, readdir, readFile, rename, rm, statfs, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, statfs, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
-import { Readable, Transform } from 'node:stream';
+import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { getDownloadInfo, normalizeDownloadUrl } from './catalog';
 import { shortHardwareId } from './hardwareId';
+import { httpRequest } from './http';
 import { runPowerShellJson } from './powershell';
 import type { CatalogEntry, DeviceInfo, DownloadedDriver, DownloadPhase } from './types';
+import { isLegacyWindows, listFilesRecursive } from './winCompat';
 
 /*
  * TẢI GÓI DRIVER VỀ MÁY — KHÔNG CÀI ĐẶT
@@ -62,11 +64,6 @@ export function decodeInf(buf: Buffer): string {
   return buf.toString('latin1');
 }
 
-async function listFiles(dir: string): Promise<string[]> {
-  const entries = await readdir(dir, { withFileTypes: true, recursive: true });
-  return entries.filter((e) => e.isFile()).map((e) => join(e.parentPath, e.name));
-}
-
 interface SignatureInfo {
   status: string;
   subject: string | null;
@@ -74,8 +71,9 @@ interface SignatureInfo {
 
 async function checkSignature(file: string): Promise<SignatureInfo> {
   return runPowerShellJson<SignatureInfo>(
-    `$s = Get-AuthenticodeSignature -LiteralPath $env:SDP_TARGET_FILE
-[pscustomobject]@{ status = [string]$s.Status; subject = $(if ($s.SignerCertificate) { $s.SignerCertificate.Subject } else { $null }) } | ConvertTo-Json -Compress`,
+    // PowerShell 2.0 (Win7) chưa có -LiteralPath cho lệnh này.
+    `$s = if ($PSVersionTable.PSVersion.Major -ge 3) { Get-AuthenticodeSignature -LiteralPath $env:SDP_TARGET_FILE } else { Get-AuthenticodeSignature -FilePath $env:SDP_TARGET_FILE }
+Out-Json @{ status = [string]$s.Status; subject = $(if ($s.SignerCertificate) { $s.SignerCertificate.Subject } else { $null }) }`,
     60_000,
     { SDP_TARGET_FILE: file },
   );
@@ -137,10 +135,16 @@ export async function downloadDriverPackage(
 
   try {
     // --- 2. Tải ---
-    const res = await fetch(url, { signal: AbortSignal.timeout(30 * 60_000) });
-    if (!res.ok || !res.body) throw new Error(`Tải thất bại: HTTP ${res.status}`);
-    const total = Number(res.headers.get('content-length')) || entry.sizeBytes || null;
-    if (total && total > MAX_DOWNLOAD_BYTES) throw new Error('Gói quá lớn (> 2 GB), bỏ qua.');
+    const res = await httpRequest(url, { timeoutMs: 30 * 60_000 });
+    if (res.status < 200 || res.status >= 300) {
+      res.body.destroy();
+      throw new Error(`Tải thất bại: HTTP ${res.status}`);
+    }
+    const total = Number(res.headers['content-length']) || entry.sizeBytes || null;
+    if (total && total > MAX_DOWNLOAD_BYTES) {
+      res.body.destroy();
+      throw new Error('Gói quá lớn (> 2 GB), bỏ qua.');
+    }
 
     // Tính hash ngay trong lúc tải để không phải đọc lại cả file (gói GPU có thể vài trăm MB).
     const sha256 = createHash('sha256');
@@ -161,8 +165,7 @@ export async function downloadDriverPackage(
         cb(null, chunk);
       },
     });
-    const body = Readable.fromWeb(res.body as import('node:stream/web').ReadableStream<Uint8Array>);
-    await pipeline(body, meter, createWriteStream(partPath));
+    await pipeline(res.body, meter, createWriteStream(partPath));
     onProgress('downloading', received, total);
 
     // --- 3. Hash ---
@@ -179,7 +182,11 @@ export async function downloadDriverPackage(
 
     // --- 4. Chữ ký số ---
     const sig = await checkSignature(cabPath);
-    if (sig.status !== 'Valid') throw new Error(`Chữ ký số không hợp lệ (${sig.status}) — file đã bị xóa.`);
+    if (sig.status !== 'Valid') {
+      // Win7 chưa cài bản vá SHA-2 (KB4474419/KB3033929) không đọc được chữ ký SHA-256 của Microsoft.
+      const hint = isLegacyWindows() ? ' Trên Windows 7 cần cài bản vá hỗ trợ SHA-2 (KB4474419).' : '';
+      throw new Error(`Chữ ký số không hợp lệ (${sig.status}) — file đã bị xóa.${hint}`);
+    }
     if (!/O=Microsoft Corporation/i.test(sig.subject ?? '')) {
       throw new Error(`Gói không do Microsoft ký (${sig.subject ?? 'không rõ'}) — file đã bị xóa.`);
     }
@@ -189,7 +196,7 @@ export async function downloadDriverPackage(
     await rm(driverDir, { recursive: true, force: true });
     await mkdir(driverDir);
     await expandCab(cabPath, driverDir);
-    const files = await listFiles(driverDir);
+    const files = await listFilesRecursive(driverDir);
     if (files.some((f) => !isInside(driverDir, f))) throw new Error('Gói chứa đường dẫn bất thường — đã xóa.');
 
     // --- 6. Đối chiếu .inf với Hardware ID ---

@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions, type WebContents } from 'electron';
+import { spawn } from 'node:child_process';
 import { stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isValidUpdateId } from './catalog';
@@ -18,7 +19,8 @@ import type {
   ExportResult,
   ScanResult,
 } from './types';
-import { isAllowedExternalUrl, WINDOWS_UPDATE_SETTINGS_URI } from './vendorLinks';
+import { isAllowedExternalUrl, LEGACY_WINDOWS_UPDATE_ARGS, WINDOWS_UPDATE_SETTINGS_URI } from './vendorLinks';
+import { isLegacyWindows } from './winCompat';
 import { checkWindowsUpdate } from './windowsUpdate';
 
 /*
@@ -89,7 +91,11 @@ function registerIpc(): void {
     await shell.openExternal(url);
   });
 
-  ipcMain.handle('open-windows-update-settings', () => shell.openExternal(WINDOWS_UPDATE_SETTINGS_URI));
+  ipcMain.handle('open-windows-update-settings', async () => {
+    if (!isLegacyWindows()) return shell.openExternal(WINDOWS_UPDATE_SETTINGS_URI);
+    const control = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'control.exe');
+    spawn(control, LEGACY_WINDOWS_UPDATE_ARGS, { detached: true, stdio: 'ignore' }).unref();
+  });
 
   registerDriverDownloadIpc();
   registerDriverExportIpc();

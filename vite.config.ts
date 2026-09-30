@@ -28,5 +28,6 @@ export default defineConfig({
   plugins: [react(), cspPlugin()],
   base: './', // load qua file:// trong Electron
   server: { port: 5173, strictPort: true },
-  build: { outDir: 'dist', emptyOutDir: true },
+  // chrome108 = Chromium của Electron 22 (bản Windows 7/8.1); bản chính mới hơn vẫn chạy được.
+  build: { outDir: 'dist', emptyOutDir: true, target: 'chrome108' },
 });
